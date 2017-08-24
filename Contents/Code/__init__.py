@@ -5,18 +5,21 @@
 #
 ###################################################################################################
 
+import re
+import json
+
 NFL_URL						= 'http://www.nfl.com'
 NFL_URL1					= 'http://a.video.nfl.com/'
 BASE_URL					= 'http://www.nfl.com/feeds-rs/videos/byChannel/%s.json?limit=100&offset=0'
 LATEST_VIDEOS				= 'http://www.nfl.com/feeds-rs/videos/byChannel/nfl-videos.json?limit=100&offset=0'
-NFL_NETWORK_LIVE			= 'http://gamepass.nfl.com/nflgp/console.jsp?nfln=true#Live'
+NFL_NETWORK_LIVE			= 'http://gamepass.nfl.com/channel/nflnetwork'
 NFL_REDZONE_LIVE			= 'http://gamepass.nfl.com/nflgp/console.jsp?nfln=true#RedzoneLive'
-GAMEPASS_SCHEDULE			= 'https://gamepass.nfl.com/nflgp/secure/schedulechange'
-GAMEREWIND_SCHEDULE			= 'https://gamerewind.nfl.com/nflgr/secure/schedulechange'
-GAMEPASS_SCHEDULE_WEEK		= 'https://gamepass.nfl.com/nflgp/secure/schedule'
-GAMEREWIND_SCHEDULE_WEEK	= 'https://gamerewind.nfl.com/nflgr/secure/schedule'
+GAMEPASS_SCHEDULE			= 'http://gamepass.nfl.com/schedule'
+GAMEREWIND_SCHEDULE			= 'http://gamerewind.nfl.com/nflgr/secure/schedulechange'
+GAMEPASS_SCHEDULE_WEEK		= 'http://gamepass.nfl.com/schedule'
+GAMEREWIND_SCHEDULE_WEEK	= 'http://gamerewind.nfl.com/nflgr/secure/schedule'
 NFL_VIDEOS_JSON				= 'http://www.nfl.com/static/embeddablevideo/%s.json'
-NFL_NETWORK_SCHEDULE		= 'http://www.locatetv.com/listings/nflnet'
+NFL_NETWORK_SCHEDULE		= 'http://neulionsmbnyc-a.akamaihd.net/u/nfl/nfl/epg/nflnetwork/2017/08/11.js'
 NFLNAIMAGE 					= 'http://smb.cdn.neulion.com/u/nfl/nfl/thumbs/'
 NFLNOW_LIST					= 'http://static.now.nfl.com/channels/list.json'
 NFL_NOW_CHANNEL_JSON		= 'http://static.now.nfl.com/channels/videos.json?channelId=%s&videosPerPage=-1&pageNumber=1'
@@ -264,18 +267,33 @@ def GamepassPlayweek():
 
 	oc = ObjectContainer(title2="NFL Game Pass")
 
-	list = HTML.ElementFromURL(GAMEPASS_SCHEDULE, errors='ignore', cacheTime=1)
+	schedule_page = HTTP.Request(GAMEPASS_SCHEDULE)
+	content = schedule_page.content
+	try:
+		games = json.loads(re.search('var scheduleGames = (\[[a-zA-Z0-9\r\n\s{}":,.-]*\]);', content).group(1))
+	except AttributeError:
+		games = []
 
-	for stream in list.xpath('//td[@class="gameTile"]/*/parent::td'):
-		sTeam1 = stream.xpath('./table/tr[2]/td[2]/text()')[0]
-		sTeam2 = stream.xpath('./table/tr[3]/td[2]/text()')[0]
+	from dateutil import parser, tz
+        gmt = tz.tzutc()
+	localtz = tz.tzlocal()
+	for stream in games:
+		sTeam1 = stream['awayTeam']['name']
+		sTeam2 = stream['homeTeam']['name']
 		sTitle = "%s @ %s" % (sTeam1,sTeam2)
 		try:
-			sSummary = stream.xpath('./table/tr[2]/td[3]/span/text()')[0].strip()
+                        if stream['gameState'] == 0:
+                                sSummary = stream['dateTimeGMT']
+			elif stream['gameState'] == 1:
+				sSummary = 'Game in Progress'
+			elif stream['gameState'] == 3:
+				sSummary = 'Game Finished'
+			else:
+				d=parser.parse(stream['dateTimeGMT'])
+				sSummary = d.astimezone(gmt).astimezone(localtz).strftime('%b %d, %H:%M %Z')
 		except:
-			sSummary = "Game Has Finished"
-		sStreamURL = stream.xpath('./table/tr[3]/td[3]/a')[0].get('href')
-		sStreamURL = sStreamURL.replace("javascript:launchApp('","http://gamepass.nfl.com/nflgp/console.jsp?eid=").replace("')","")
+			sSummary = "Couldn't get summary"
+		sStreamURL = "http://gamepass.nfl.com/game/" + stream['id']
 		
 		oc.add(VideoClipObject(url=sStreamURL + "#Live", title=sTitle+" - "+sSummary, summary = sSummary, thumb=R("icon-gamepass-live.png")))
 
